@@ -3,19 +3,19 @@
 (provide (all-defined-out))
 
 (struct hol_type ()                  #:transparent)
-(struct tyvar    hol_type (name)     #:transparent)     ;; name : string
+(struct tyvar    hol_type (name)     #:transparent) ;; name : string
 (struct tyapp    hol_type (name sig) #:transparent) ;; name : string, sig: [hol_type]
 
 (struct hol_term ()                     #:transparent)
-(struct var      hol_term (name type)   #:transparent)   ;; name : string, type : hol_type
-(struct constant hol_term (name type)   #:transparent)   ;; name : string, type : hol_type
+(struct var      hol_term (name type)   #:transparent) ;; name : string, type : hol_type
+(struct constant hol_term (name type)   #:transparent) ;; name : string, type : hol_type
 (struct comb     hol_term (term1 term2) #:transparent) ;; term1 : hol_term, term2 : hol_term
 (struct lam_abs  hol_term (term1 term2) #:transparent) ;; term1 : hol_term, term2 : hol_term
 
 (struct thm     ())
 (struct sequent thm (terms term) #:transparent) ;; terms : [hol_term], term : hol_term
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Let me build compare I guess...
 
 (define (string_compare x y)
@@ -61,8 +61,8 @@
     [(and (list? x) (list? y))         (list_compare x y)]
     [else (error (format "Couldn't compare ~s and ~s" x y))]))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Ghetto helpers
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Just a handful of helpers
 (define (try/throw test msg)
   (let ([x test])
     (if x x (error msg))))
@@ -74,12 +74,18 @@
     [(findf (lambda (y) (equal? a (cdr y))) l) => car]
     [else d]))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Types and Type Constants
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Kick off the initial types
 (define the_type_constants (box '(("bool" . 0) ("fun" . 2))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Define all returned types
 (define (types) (unbox the_type_constants))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Lookup funciton for type constants, returns arity if it succeeds
 ;; assoc in ML sort of had this behaviour, but they use 'can', so I sorta need this
 (define (get_type_arity s) 
@@ -87,12 +93,14 @@
     [(assoc s (types)) => cdr]
     [else #f])) 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Delcare a new type
 (define (new_type name arity)
   (if (get_type_arity name)
       (error (format "new_type: type ~s has already been delared" name))
       (set-box! the_type_constants `((,name . ,arity) . ,(types)))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Basic type constructors
 (define (mk_type tyop args)
   (let ([arity (try/throw (get_type_arity tyop) (format "mk_type: type ~s has not been defined" tyop))])
@@ -102,6 +110,7 @@
 
 (define mk_vartype tyvar)
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Basic type destructors
 
 (define (dest_type ty)
@@ -114,11 +123,13 @@
     [(tyapp _s _t) (error "dest_vartype: type constructor is not a variable")]
     [(tyvar s)     s]))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Basic type discriminators
 
 (define is_type    tyapp?)
 (define is_vartype tyvar?)
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Return the type variable in a type and in a list of types
 ;; itlist appears to be fold
 (define (tyvars ty)
@@ -126,6 +137,7 @@
     [(tyapp s args) (foldr set-union '() (map tyvars args))]
     [(tyvar v)      (list v)]))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Substitute types for type variables
 ;; non-variables in the subst list are just ignored (?), as a repetitions (first always taken)
 ;; I didn't use qmap or any of the other optimizations here because who cares!
@@ -140,6 +152,7 @@
 (define bool_ty (tyapp "bool" '()))
 (define aty     (tyvar "A"))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; List of the term constants and their types.
 ;; We begine with just euqality (over all types). We'll add Hilbert's choice operator later.
 (define the_term_constants (box `(("=" . ,(tyapp "fun" 
@@ -210,6 +223,9 @@
   (match term
     [(lam_abs v b) (cons v b)]
     [else (error "dest_abs: not an abstraction")]))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; General tools and internal guts for interacting with theorems
 
 ;; finds the free variables within a term
 (define (frees term)
@@ -407,6 +423,9 @@
   (match thm
     ([sequent asl c] c)))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Theorem constructors for user-facing stuff
+
 ;; Basic equality properties. Trans is derivable but included for being fast while I fight
 
 (define (REFL term) (sequent '() (safe_mk_eq term term)))
@@ -480,6 +499,7 @@
   (let ([inst_fn (lambda (x) (vsubst theta x))])
     (sequent (term_image inst_fn (sequent-terms s)) (inst_fn (sequent-term s)))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Handling of axioms
 
 (define the_axioms (box '())) ;; Theorem list
@@ -512,6 +532,7 @@
                dth)])]
      [else (raise "new_basic_definition: malformed input")]))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Handling of type definitions
 
 (define (new_basic_type_definition tyname absxrep sqt)
@@ -544,6 +565,7 @@
                         (sequent '() (safe_mk_eq (comb P r) 
                                                  (safe_mk_eq (mk_comb rep (mk_comb abs r)) r)))))))])])))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Stuff that doesn't seem worth putting in (?)
 
 (define (mk_fun_ty ty1 ty2) (mk_type "fun" (list ty1 ty2)))
