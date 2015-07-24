@@ -1,26 +1,71 @@
 #lang racket
 
-(struct hol_type ())
-(struct tyvar    hol_type (name))     ;; name : string
-(struct tyapp    hol_type (name sig)) ;; name : string, sig: [hol_type]
+(provide (all-defined-out))
 
-(struct hol_term ())
-(struct var      hol_term (name type))   ;; name : string, type : hol_type
-(struct constant hol_term (name type))   ;; name : string, type : hol_type
-(struct comb     hol_term (term1 term2)) ;; term1 : hol_term, term2 : hol_term
-(struct lam_abs  hol_term (term1 term2)) ;; term1 : hol_term, term2 : hol_term
+(struct hol_type ()                  #:transparent)
+(struct tyvar    hol_type (name)     #:transparent)     ;; name : string
+(struct tyapp    hol_type (name sig) #:transparent) ;; name : string, sig: [hol_type]
+
+(struct hol_term ()                     #:transparent)
+(struct var      hol_term (name type)   #:transparent)   ;; name : string, type : hol_type
+(struct constant hol_term (name type)   #:transparent)   ;; name : string, type : hol_type
+(struct comb     hol_term (term1 term2) #:transparent) ;; term1 : hol_term, term2 : hol_term
+(struct lam_abs  hol_term (term1 term2) #:transparent) ;; term1 : hol_term, term2 : hol_term
 
 (struct thm     ())
-(struct sequent thm (terms term)) ;; terms : [hol_term], term : hol_term
+(struct sequent thm (terms term) #:transparent) ;; terms : [hol_term], term : hol_term
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Let me build compare I guess...
+
+(define (string_compare x y)
+  (cond
+    [(string<? x y) -1]
+    [(string=? x y) 0]
+    [else 1]))
+
+(define (var_compare x y) 
+  (let ([c (string_compare (var-name x) (var-name y))])
+    (if (zero? c)
+        (compare (var-type x) (var-type y))
+        c)))
+
+(define (list_compare x y)
+  (cond
+    [(and (null? x) (null? y)) 0]
+    [(null? x) -1]
+    [(null? y)  1]
+    [else 
+      (let ([c (compare (car x) (car y))])
+        (if (zero? c)
+            (list_compare (cdr x) (cdr y))
+            c))]))
+
+(define (type_compare x y)
+  (cond
+    [(and (tyvar? x) (tyapp? y)) -1]
+    [(and (tyapp? x) (tyvar? y))  1]
+    [(and (tyvar? x) (tyvar? y))  1]
+    [(and (tyvar? x) (tyvar? y)) (compare (tyvar-name x) (tyvar-name y))]
+    [(and (tyapp? x) (tyapp? y))
+     (let ([c (compare (tyapp-name x) (tyapp-name y))])
+       (if (zero? c)
+           (compare (tyapp-sig x) (tyapp-sig y))
+           c))]))
+
+(define (compare x y) 
+  (cond
+    [(and (string? x) (string? y))     (string_compare x y)]
+    [(and (var? x) (var? y))           (var_compare x y)]
+    [(and (hol_type? x) (hol_type? y)) (type_compare x y)]
+    [(and (list? x) (list? y))         (list_compare x y)]
+    [else (error (format "Couldn't compare ~s and ~s" x y))]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Ghetto helpers
 (define (try/throw test msg)
   (let ([x test])
     (if x x (error msg))))
-
-;; (define (union l s)
-;;   (foldr (lambda (x ls) (if (memq x ls) ls (cons x ls))) s l))
 
 ;; Looks up based on the cdr of the pair in the assoc list, where the last
 ;; argument is a default value if it doesn't fine one.
@@ -288,10 +333,65 @@
     [else (error "dest_eq")]))
 
 ;; Useful to have term union modulo alpha-conversion for assumption lists (Wat)
+(define (ordav env x1 x2) 
+  (cond
+    [(null? env) (compare x1 x2)]
+    [else (let ([t1 (caar env)]
+                [t2 (cdar env)]
+                [oenv (cdr env)])
+            (let ([test1 (compare x1 t1)]
+                  [test2 (compare x2 t2)])
+              (cond
+                [(and (zero? test1) (zero? test2)) 0]
+                [(zero? test1) -1]
+                [(zero? test2) 1]
+                [else (ordav oenv x1 x2)])))]))
 
-(define alphaOrder (lambda (x y) 0))
-(define term_union list)
-(define term_image list)
+(define (orda env term1 term2)  
+  (cond
+    [(and (equal? term1 term2) (andmap (lambda (xy) (equal? (car xy) (cdr xy))) env)) 0]
+    [else
+      (match (list term1 term2)
+        [(list (var x1 ty1) (var x2 ty2)) (ordav env term1 term2)]
+        [(list (constant x1 ty1) (constant x2 ty2)) (compare term1 term2)]
+        [(list (comb s1 t1) (comb s2 t2)) 
+         (let ([c (orda env s1 s2)])
+           (if (not (zero? c)) c (orda env t1 t2)))]
+        [(list (lam_abs (and x1 (var v1 ty1)) t1) (lam_abs (and x2 (var v2 ty2)) t2))
+         (let ([c (compare ty1 ty2)])
+           (if (not (zero? c)) c (orda (cons (cons x1 x2) env) t1 t2)))]
+        [(list (constant _ _) _) -1]
+        [(list (var _ _) _)      -1]
+        [(list (comb _ _) _)     -1]
+        [(list _ (constant _ _))  1]
+        [(list _ (var _ _))       1]
+        [(list _ (comb _ _))      1])]))
+
+(define (alphaorder term1 term2) (orda '() term1 term2))
+
+(define (term_union l1 l2)
+  (cond
+    [(null? l1) l2]
+    [(null? l2) l1]
+    [else (let ([c (alphaorder (car l1) (car l2))])
+            (cond
+              [(zero? c) (cons (car l1) (term_union (cdr l1) (cdr l2)))]
+              [(< c 0)   (cons (car l1) (term_union (cdr l1) l2))]
+              [else      (cons (car l2) (term_union l1 (cdr l2)))]))]))
+
+(define (term_remove t l)
+  (cond
+    [(null? l) l]
+    [else (let ([c (alphaorder t (car l))])
+            (cond
+              [(> c 0) (cons (car l) (term_remove t (cdr l)))]
+              [(zero? c) (cdr l)]
+              [else l]))]))
+
+(define (term_image f l)
+  (cond 
+    [(null? l) l]
+    [else (term_union (list (f (car l))) (term_image f (cdr l)))]))
 
 ;; Basic theorem destructors
 
@@ -319,7 +419,7 @@
             [m2r (dest_eq c2)]
             [m2  (car m2r)]
             [r   (cdr m2r)])
-      (if (zero? (alphaOrder m1 m2))
+      (if (zero? (alphaorder m1 m2))
           (sequent (term_union asl1 asl2) (comb eql r))
           (raise "TRANS")))]
      [else (raise "TRANS")]))
@@ -446,3 +546,24 @@
 
 ;; Stuff that doesn't seem worth putting in (?)
 
+(define (mk_fun_ty ty1 ty2) (mk_type "fun" (list ty1 ty2)))
+
+(define (is_eq term)
+  (match term
+    [(comb (comb (constant "=" _1) _2) _3) #t]
+    [else #f]))
+
+(define (mk_eq l r)
+  (let* ([ty (type_of l)]
+         [eq_tm (inst `((,ty . ,aty)) (mk_const "=" '()))])
+    (mk_comb (mk_comb eq_tm l) r)))
+
+;; Test for alpha convertability
+
+(define (aconv s t) (zero? (alphaorder s t)))
+
+;; comparison function on theorems
+
+(define (equals_thm thm1 thm2) (equal? (dest_thm thm1) (dest_thm thm2)))
+
+(define Av (var "A" aty))
